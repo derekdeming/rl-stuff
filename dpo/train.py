@@ -23,19 +23,29 @@ this is going to be able to run on multiple GPUs
 
 '''
 
-l_dir = "qwen3.2-14b-instruct"
-tokenizer = AutoTokenizer.from_pretrained(l_dir, use_fast= false) 
+hf_dir = "Qwen/Qwen3-4B-Thinking-2507"
+tokenizer = AutoTokenizer.from_pretrained(hf_dir, use_fast= False) 
 datase = load_from_disk("safe_pair_data/")["train"]
 
 
-def get_rank(): return int(os.environ.get("L_RANK", 0))
+def get_rank(): return int(os.environ.get("HF_RANK", 0))
 
 def get_world_size(): return int(os.environ.get("WORLD_SIZE", 1))
 
 def get_local_rank(): return int(os.environ.get("LOCAL_RANK", 0))
 
-def get_local_world_size(): return int(os.environ.get("LOCAL_WORLD_SIZE", 1))
+def get_local_world_size(): return int(os.environ.get("HF_LOCAL_WORLD_SIZE", 1))
 
 def get_device(): return torch.device(f"cuda:{get_local_rank()}" if torch.cuda.is_available() else "cpu")
+
+primary_process = get_rank() == 0
+
+'''
+for the pad token and id we're going to use eos_token and eos_token_id
+
+'''
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.pad_token_id = tokenizer.eos_token_id
+
 
 
