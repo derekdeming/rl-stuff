@@ -83,3 +83,27 @@ class PreferenceDataset(Dataset):
 
 train_dataset = PreferenceDataset(ds)
 
+
+"""
+need to collate the data into a batch 
+batch of chosen and rejected
+"""
+
+train_dataloader = DataLoader(train_dataset, batch_size=1, collate_fn=collate_fn, shuffle=True)
+
+def collate_fn(batch):
+    input_ids, labels_list = [], []
+    for prompt, chosen_resp, rejected_resp in batch:
+        p_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        c_ids = tokenizer(chosen_resp, add_special_tokens=False)["input_ids"]
+        r_ids = tokenizer(rejected_resp, add_special_tokens=False)["input_ids"]
+        input_ids += [torch.tensor(p_ids + c_ids, dtype = torch.long), torch.tensor(p_ids + r_ids, dtype = torch.long)]
+        labels_list += [torch.tensor([-100]*len(p_ids) + c_ids, dtype = torch.long), torch.tensor([-100]*len(p_ids) + r_ids, dtype = torch.long)]
+
+    input_ids = pad_sequence(input_ids, batch_first=True, padding_value=tokenizer.pad_token_id)
+    attention_mask = (input_ids != tokenizer.pad_token_id)
+    labels_tensor = pad_sequence(labels_list, batch_first=True, padding_value=-100)
+    assert input_ids.shape == attention_mask.shape and attention_mask.shape == labels_tensor.shape
+    return input_ids.to(get_local_rank()), attention_mask.to(get_local_rank()), labels_tensor.to(get_local_rank())
+
+    
