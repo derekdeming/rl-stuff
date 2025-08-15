@@ -134,3 +134,29 @@ train_loader = DataLoader(
     # num_workers=4,    # adjust if needed
     # pin_memory=True
 )
+
+max_steps = len(train_loader)
+if primary_process: 
+    print(f"the epoch will run for {max_steps} steps")
+
+# optimizer 
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-6)
+torch.set_float32_matmul_precision('high')
+
+# training loop for DPO fine-tuning 
+epochs = 3
+beta = 0.1
+if primary_process:
+    log_dir = "dpo_models"
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"log.txt")
+    with open(log_file, "w") as f: # open for writing to clear the file
+        pass
+
+
+
+
+
+
+
+
