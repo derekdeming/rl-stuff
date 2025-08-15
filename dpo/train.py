@@ -106,4 +106,31 @@ def collate_fn(batch):
     assert input_ids.shape == attention_mask.shape and attention_mask.shape == labels_tensor.shape
     return input_ids.to(get_local_rank()), attention_mask.to(get_local_rank()), labels_tensor.to(get_local_rank())
 
+
+def def_lr(it, max_steps, warmup_steps = None, max_lr=2e-6, min_lr=2e-7):
+    warmup_steps = int(0.01*max_steps)
+    if it < warmup_steps: # linear warmup 
+        return max_lr * (it+1) / warmup_steps # return max learning rate
+    if it > max_steps: # return min learning rate
+        return min_lr
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0 (this describes the cosine decay)
+    return min_lr + coeff * (max_lr - min_lr)
     
+# setup the dataloader for distributed training 
+train_sampler = torch.utils.data.distributed.DistributedSampler(
+    train_dataset,
+    num_replicas=get_world_size(),
+    rank=get_rank(),
+    shuffle=True
+)
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=4,
+    sampler=train_sampler,
+    collate_fn=collate_fn,
+    # num_workers=4,    # adjust if needed
+    # pin_memory=True
+)
