@@ -153,8 +153,8 @@ if primary_process:
     with open(log_file, "w") as f: # open for writing to clear the file
         pass
 
-
-
+gradient_accumulation_steps = 4
+optimizer.zero_grad(set_to_none=True)
 
 
 
