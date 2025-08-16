@@ -156,7 +156,73 @@ if primary_process:
 gradient_accumulation_steps = 4
 optimizer.zero_grad(set_to_none=True)
 
+for epoch in range(number_epochs):
+    train_sampler.set_epoch(epoch)
+    model.train()
+    for steps, (input_ids, attention_mask, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{number_epochs}")):
+        is_grad_accum_step = (steps + 1) % gradient_accumulation_steps == 0
+        model.require_backward_grad_sync = is_grad_accum_step
+        loss_ = 0.0 # purely for logging
+        #forward current model 
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            outputs = model(input_ids, attention_mask=attention_mask)
+        logits = outputs.logits # .float() [B*2, T, V] which is [batch_size, seq_len, vocab_size]
 
+        if torch.isnan(logits).any() or torch.isinf(logits).any():
+            raise RuntimeError(f"NaN or Inf in logits at step: {steps}")
 
+        # forward reference model (frozen model -- no grads)
+        with torch.no_grad():
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                ref_outputs = ref_model(input_ids, attention_mask=attention_mask)
+            ref_logits = ref_outputs.logits # .float()
+
+        logits = logits[..., :-1, :].contiguous() # [2B, T-1, V]
+        ref_logits = ref_logits[..., :-1, :].contiguous() # [2B, T-1, V]
+        labels = labels[..., :1].contiguous() # [2B, T-1]
+
+        # early check 2: ref_logits 
+        if torch.isnan(ref_logits).any() or torch.isinf(ref_logits).any():
+            raise RuntimeError(f"NaN or Inf in ref_logits at step: {steps}")
+
+        # compute the per-token NLL (negative log likelihood)
+        V = logits.size(-1)
+        loss_t = F.cross_entropy(logits.view(-1, V), labels.view(-1), ignore_index=-100, reduction='none').view(logits.size(0), logits.size(1)) # [2B, T-1]
+        ref_loss_t = F.cross_entropy(ref_logits.view(-1, V), labels.view(-1), ignore_index=-100, reduction='none').view(ref_logits.size(0), ref_logits.size(1)) # [2B, T-1]
+
+        # check 3 : per-token losses 
+        if torch.isnan(loss_t).any() or torch.isinf(loss_t).any():
+            raise RuntimeError(f"NaN or Inf in loss_t at step: {steps}")
+
+        if torch.isnan(ref_loss_t).any() or torch.isinf(ref_loss_t).any():
+            raise RuntimeError(f"NaN or Inf in ref_loss_t at step: {steps}")
+
+        # sum to get sequence NLL 
+        nll_seq = loss_t.sum(dim=-1) # [2B]
+        ref_nll_seq = ref_loss_t.sum(dim=-1) # [2B]
+
+        # check 4 : sequence NLL 
+        if torch.isnan(nll_seq).any() or torch.isinf(nll_seq).any():
+            raise RuntimeError(f"NaN or Inf in nll_seq at step: {steps}")
+        if torch.isnan(ref_nll_seq).any() or torch.isinf(ref_nll_seq).any():
+            raise RuntimeError(f"NaN or Inf in ref_nll_seq at step: {steps}")
+
+        # split chosen and rejected 
+        nll_c, nll_r = nll_seq[0::2], nll_seq[1::2]
+        ref_nll_c, ref_nll_r = ref_nll_seq[0::2], ref_nll_seq[1::2]
+
+        #dpo loss
+        diff_thetas = (nll_r - nll_c) # .unsqueeze(-1) # [B]
+        diff_ref = ref_nll_r - ref_nll_c # [B]
+        inner = beta*(diff_thetas - diff_ref)
+
+        # check inner
+        if torch.isnan(inner).any() or torch.isinf(inner).any():
+            raise RuntimeError(f"NaN or Inf in inner at step: {steps}")
+
+        # dpo loss 
+        dpo_loss = -F.logsigmoid(inner).mean()
+        dpo_loss = dpo_loss/gradient_accumulation_steps
+        loss_ += dpo_loss.detach()
 
 
