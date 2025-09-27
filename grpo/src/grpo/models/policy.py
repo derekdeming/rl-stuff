@@ -1,3 +1,5 @@
+"""Model wrappers for policy, value, and reference networks."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,13 +29,30 @@ class PolicyWithValue(nn.Module):
 
     def forward(self, input_ids: Tensor, attention_mask: Optional[Tensor] = None) -> ForwardOutput:
         """Return policy logits and value predictions for given inputs."""
-        # TODO: need to integrate actual transformer outputs here.
-        raise NotImplementedError("Implement forward pass by integrating with backbone outputs")
+        kwargs: Dict[str, Any] = {"input_ids": input_ids, "return_dict": True}
+        if attention_mask is not None:
+            kwargs["attention_mask"] = attention_mask
+        kwargs.setdefault("output_hidden_states", True)
+        outputs = self.backbone(**kwargs)
+        last_hidden = getattr(outputs, "hidden_states", None)
+        if last_hidden:
+            features = last_hidden[-1]
+        else:
+            features = outputs.last_hidden_state
+        values = self.value_head(features).squeeze(-1)
+        return ForwardOutput(logits=outputs.logits, values=values, hidden_states=features)
 
     @torch.no_grad()
-    def generate(self, *args: Any, **kwargs: Any) -> Dict[str, Tensor]:
-        """Sample sequences from the policy; to be overridden per backbone."""
-        raise NotImplementedError("Provide sampling implementation for the chosen backbone")
+    def generate(
+        self,
+        input_ids: Tensor,
+        attention_mask: Optional[Tensor] = None,
+        **generate_kwargs: Any,
+    ) -> Any:
+        """Sample sequences from the policy backbone."""
+        if attention_mask is not None:
+            generate_kwargs.setdefault("attention_mask", attention_mask)
+        return self.backbone.generate(input_ids=input_ids, **generate_kwargs)
 
 
 class ReferenceModel(nn.Module):
@@ -42,13 +61,17 @@ class ReferenceModel(nn.Module):
     def __init__(self, backbone: nn.Module) -> None:
         super().__init__()
         self.backbone = backbone
+        self.backbone.eval()
         for param in self.parameters():
             param.requires_grad_(False)
 
     def forward(self, input_ids: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
         """Return logits of the frozen reference model."""
-        # TODO: need to implement reference forward pass to obtain logits
-        raise NotImplementedError("Implement reference forward pass to obtain logits")
+        kwargs: Dict[str, Any] = {"input_ids": input_ids, "return_dict": True}
+        if attention_mask is not None:
+            kwargs["attention_mask"] = attention_mask
+        outputs = self.backbone(**kwargs)
+        return outputs.logits
 
 
 __all__ = [
