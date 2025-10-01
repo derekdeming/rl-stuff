@@ -26,3 +26,5 @@
 - What evaluation harness (if any) should accompany the base project?
 - How will rewards be generated for early experiments (rule-based vs model-based)?
 
+## Decisions (2025-09-27)
+- Adopt the Qwen3-Coder instruction models (`Qwen/Qwen3-Coder-7B-Instruct`) as the baseline backbone for both the trainable policy and the frozen reference to stay close to SOTA open-weight code models while retaining `transformers` compatibility.
